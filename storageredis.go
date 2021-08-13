@@ -5,19 +5,16 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"os"
+	"github.com/caddyserver/caddy/v2"
 	"path"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"go.uber.org/zap"
 
 	"github.com/bsm/redislock"
-	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/certmagic"
 	"github.com/go-redis/redis/v8"
 )
@@ -140,164 +137,9 @@ type StorageData struct {
 	Modified time.Time `json:"modified"`
 }
 
-func init() {
-	caddy.RegisterModule(RedisStorage{})
-}
-
-// register caddy module with ID caddy.storage.redis
-func (RedisStorage) CaddyModule() caddy.ModuleInfo {
-	return caddy.ModuleInfo{
-		ID: "caddy.storage.redis",
-		New: func() caddy.Module {
-			return new(RedisStorage)
-		},
-	}
-}
-
 // CertMagicStorage converts s to a certmagic.Storage instance.
 func (rd *RedisStorage) CertMagicStorage() (certmagic.Storage, error) {
 	return rd, nil
-}
-
-func (rd *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
-	for d.Next() {
-		key := d.Val()
-		var value string
-
-		if !d.Args(&value) {
-			continue
-		}
-
-		switch key {
-		case "address":
-			if value != "" {
-				parsedAddress, err := caddy.ParseNetworkAddress(value)
-				if err == nil {
-					rd.Address = parsedAddress.JoinHostPort(0)
-				} else {
-					rd.Address = ""
-				}
-			}
-		case "host":
-			if value != "" {
-				rd.Host = value
-			} else {
-				rd.Host = DefaultRedisHost
-			}
-		case "port":
-			if value != "" {
-				rd.Port = value
-			} else {
-				rd.Port = DefaultRedisPort
-			}
-		case "db":
-			if value != "" {
-				dbParse, err := strconv.Atoi(value)
-				if err == nil {
-					rd.DB = dbParse
-				} else {
-					rd.DB = DefaultRedisDB
-				}
-			} else {
-				rd.DB = DefaultRedisDB
-			}
-		case "username":
-			if value != "" {
-				rd.Username = value
-			} else {
-				rd.Username = DefaultRedisUsername
-			}
-		case "password":
-			if value != "" {
-				rd.Password = value
-			} else {
-				rd.Password = DefaultRedisPassword
-			}
-		case "timeout":
-			if value != "" {
-				timeParse, err := strconv.Atoi(value)
-				if err == nil {
-					rd.Timeout = timeParse
-				} else {
-					rd.Timeout = DefaultRedisTimeout
-				}
-			} else {
-				rd.Timeout = DefaultRedisTimeout
-			}
-		case "key_prefix":
-			if value != "" {
-				rd.KeyPrefix = value
-			} else {
-				rd.KeyPrefix = DefaultKeyPrefix
-			}
-		case "value_prefix":
-			if value != "" {
-				rd.ValuePrefix = value
-			} else {
-				rd.ValuePrefix = DefaultValuePrefix
-			}
-		case "aes_key":
-			if value != "" {
-				rd.AesKey = value
-			} else {
-				rd.AesKey = DefaultAESKey
-			}
-		case "tls_enabled":
-			if value != "" {
-				tlsParse, err := strconv.ParseBool(value)
-				if err == nil {
-					rd.TlsEnabled = tlsParse
-				} else {
-					rd.TlsEnabled = DefaultRedisTLS
-				}
-			} else {
-				rd.TlsEnabled = DefaultRedisTLS
-			}
-		case "tls_insecure":
-			if value != "" {
-				tlsInsecureParse, err := strconv.ParseBool(value)
-				if err == nil {
-					rd.TlsInsecure = tlsInsecureParse
-				} else {
-					rd.TlsInsecure = DefaultRedisTLSInsecure
-				}
-			} else {
-				rd.TlsInsecure = DefaultRedisTLSInsecure
-			}
-		}
-	}
-	return nil
-}
-
-func (rd *RedisStorage) Provision(ctx caddy.Context) error {
-	rd.Logger = ctx.Logger(rd).Sugar()
-	rd.GetConfigValue()
-	rd.Logger.Info("TLS Storage are using Redis, on " + rd.Address)
-	if err := rd.BuildRedisClient(); err != nil {
-		return err
-	}
-	return nil
-}
-
-// GetConfigValue get Config value from env, if already been set by Caddyfile, don't overwrite
-func (rd *RedisStorage) GetConfigValue() {
-	logger, _ := zap.NewProduction()
-	defer logger.Sync() // flushes buffer, if any
-	rd.Logger = logger.Sugar()
-	rd.Logger.Debugf("GetConfigValue [%s]:%s", "pre", rd)
-	rd.Host = configureString(rd.Host, EnvNameRedisHost, DefaultRedisHost)
-	rd.Port = configureString(rd.Port, EnvNameRedisPort, DefaultRedisPort)
-	rd.DB = configureInt(rd.DB, EnvNameRedisDB, DefaultRedisDB)
-	rd.Timeout = configureInt(rd.Timeout, EnvNameRedisTimeout, DefaultRedisTimeout)
-	rd.Username = configureString(rd.Username, EnvNameRedisUsername, DefaultRedisUsername)
-	rd.Password = configureString(rd.Password, EnvNameRedisPassword, DefaultRedisPassword)
-	rd.TlsEnabled = configureBool(rd.TlsEnabled, EnvNameTLSEnabled, DefaultRedisTLS)
-	rd.TlsInsecure = configureBool(rd.TlsInsecure, EnvNameTLSInsecure, DefaultRedisTLSInsecure)
-	rd.KeyPrefix = configureString(rd.KeyPrefix, EnvNameKeyPrefix, DefaultKeyPrefix)
-	rd.ValuePrefix = configureString(rd.ValuePrefix, EnvNameValuePrefix, DefaultValuePrefix)
-	rd.AesKey = configureString(rd.AesKey, EnvNameAESKey, DefaultAESKey)
-	rd.Address = configureString(rd.Address, "", rd.Host+":"+rd.Port)
-	rd.Logger.Debugf("GetConfigValue [%s]:%s", "post", rd)
 }
 
 // helper function to prefix key
@@ -628,8 +470,6 @@ func (rd *RedisStorage) GetAESKeyByte() []byte {
 // interface guard
 var (
 	_ caddy.StorageConverter = (*RedisStorage)(nil)
-	_ caddyfile.Unmarshaler  = (*RedisStorage)(nil)
-	_ caddy.Provisioner      = (*RedisStorage)(nil)
 )
 
 func (rd RedisStorage) String() string {
@@ -642,49 +482,4 @@ func (rd RedisStorage) String() string {
 	}
 	strVal, _ := json.Marshal(rd)
 	return string(strVal)
-}
-
-func configureBool(value bool, envVariableName string, valueDefault bool) bool {
-	if value {
-		return value
-	}
-	if envVariableName != "" {
-		valueEnvStr := os.Getenv(envVariableName)
-		if valueEnvStr != "" {
-			valueEnv, err := strconv.ParseBool(os.Getenv(envVariableName))
-			if err == nil {
-				return valueEnv
-			}
-		}
-	}
-	return valueDefault
-}
-
-func configureInt(value int, envVariableName string, valueDefault int) int {
-	if value != 0 {
-		return value
-	}
-	if envVariableName != "" {
-		valueEnvStr := os.Getenv(envVariableName)
-		if valueEnvStr != "" {
-			valueEnv, err := strconv.Atoi(os.Getenv(envVariableName))
-			if err == nil {
-				return valueEnv
-			}
-		}
-	}
-	return valueDefault
-}
-
-func configureString(value string, envVariableName string, valueDefault string) string {
-	if value != "" {
-		return value
-	}
-	if envVariableName != "" {
-		valueEnvStr := os.Getenv(envVariableName)
-		if valueEnvStr != "" {
-			return valueEnvStr
-		}
-	}
-	return valueDefault
 }
