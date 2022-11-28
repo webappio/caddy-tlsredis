@@ -449,7 +449,7 @@ func (rd *RedisStorage) updateRedisLockFreshness(key string) (bool, error) {
 }
 
 // Unlock is to unlock value
-func (rd *RedisStorage) Unlock(key string) error {
+func (rd *RedisStorage) Unlock(ctx context.Context, key string) error {
 	if lockI, exists := rd.locks.Load(key); exists {
 		if lock, ok := lockI.(*redislock.Lock); ok {
 			err := lock.Release(rd.ctx)
